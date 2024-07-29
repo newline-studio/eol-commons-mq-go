@@ -10,7 +10,6 @@ import (
 
 type RabbitMQ struct {
 	conn         *amqp.Connection
-	ch           *amqp.Channel
 	exchangeName string
 	exchangeType string
 	logger       *slog.Logger
@@ -40,14 +39,10 @@ func NewRabbitMQ(cfg Config) (*RabbitMQ, error) {
 	}, nil
 }
 
-func (r *RabbitMQ) OpenChannel() error {
-	if r.ch != nil {
-		return nil
-	}
-
+func (r *RabbitMQ) OpenChannel() (*amqp.Channel, error) {
 	ch, err := r.conn.Channel()
 	if err != nil {
-		return fmt.Errorf("failed to open a channel: %w", err)
+		return nil, fmt.Errorf("failed to open a channel: %w", err)
 	}
 
 	err = ch.ExchangeDeclare(
@@ -61,34 +56,30 @@ func (r *RabbitMQ) OpenChannel() error {
 	)
 	if err != nil {
 		ch.Close()
-		return fmt.Errorf("failed to declare an exchange: %w", err)
+		return nil, fmt.Errorf("failed to declare an exchange: %w", err)
 	}
 
-	r.ch = ch
 	r.logger.Info("Channel opened", "exchange", r.exchangeName)
-	return nil
-}
-
-func (r *RabbitMQ) CloseChannel() error {
-	if r.ch != nil {
-		err := r.ch.Close()
-		r.ch = nil
-		if err != nil {
-			return fmt.Errorf("error closing channel: %w", err)
-		}
-		r.logger.Info("Channel closed")
-	}
-	return nil
+	return ch, nil
 }
 
 func (r *RabbitMQ) Publish(ctx context.Context, routingKey string, body []byte) error {
-	if r.ch == nil {
-		if err := r.OpenChannel(); err != nil {
-			return err
-		}
+	ch, err := r.OpenChannel()
+	if err != nil {
+		return err
+	}
+	defer ch.Close()
+
+	err = r.PublishWithChannel(ctx, ch, routingKey, body)
+	if err != nil {
+		return fmt.Errorf("failed to publish a message: %w", err)
 	}
 
-	err := r.ch.PublishWithContext(
+	return nil
+}
+
+func (r *RabbitMQ) PublishWithChannel(ctx context.Context, ch *amqp.Channel, routingKey string, body []byte) error {
+	err := ch.PublishWithContext(
 		ctx,
 		r.exchangeName,
 		routingKey,
@@ -107,7 +98,7 @@ func (r *RabbitMQ) Publish(ctx context.Context, routingKey string, body []byte) 
 	return nil
 }
 
-func (r *RabbitMQ) closeConnection() error {
+func (r *RabbitMQ) Close() error {
 	if r.conn != nil {
 		err := r.conn.Close()
 		if err != nil {
@@ -116,11 +107,4 @@ func (r *RabbitMQ) closeConnection() error {
 		r.logger.Info("Connection closed")
 	}
 	return nil
-}
-
-func (r *RabbitMQ) Close() error {
-	if err := r.CloseChannel(); err != nil {
-		return err
-	}
-	return r.closeConnection()
 }

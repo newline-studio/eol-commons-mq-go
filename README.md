@@ -1,4 +1,4 @@
-## Initialize connection
+## Initializing the client
 ```go
 logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
@@ -12,25 +12,36 @@ cfg := Config{
 
 rmq, err := NewRabbitMQ(cfg)
 if err != nil {
-    logger.Error("Failed to initialize RabbitMQ", "error", err)
     panic(err)
 }
 defer rmq.Close()
 ```
 
-## Publish a message
+## Publishing a message
+Will open a channel, publish the message and close the channel.
 ```go
-ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-defer cancel()
-
-// Publish a message, channel will be opened automatically if needed
-err = rmq.Publish(ctx, "example.route", []byte("Hello, RabbitMQ!"))
+err := rmq.Publish(ctx, "example.route", []byte("Hello, RabbitMQ!"))
 if err != nil {
-    logger.Error("Failed to publish message", "error", err)
-}
-
-// Close the channel explicitly if needed
-if err := rmq.CloseChannel(); err != nil {
-    logger.Error("Failed to close channel", "error", err)
+    panic(err)
 }
 ```
+
+## Manually managing the channel
+```go
+ch, err := rmq.OpenChannel()
+if err != nil {
+    panic(err)
+}
+defer ch.Close()
+
+err = rmq.PublishOnChannel(ctx, ch, "another.route", []byte("Another message"))
+if err != nil {
+    panic(err)
+}
+
+err = rmq.PublishOnChannel(ctx, ch, "yet.another.route", []byte("Yet another message"))
+if err != nil {
+    panic(err)
+}
+```
+
