@@ -1,4 +1,4 @@
-package main
+package commonsMq
 
 import (
 	"context"
@@ -8,7 +8,14 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-type RabbitMQ struct {
+type AMQP interface {
+	OpenChannel() (*amqp.Channel, error)
+	Publish(ctx context.Context, routingKey string, body []byte) error
+	PublishWithChannel(ctx context.Context, ch *amqp.Channel, routingKey string, body []byte) error
+	Close() error
+}
+
+type rabbitMq struct {
 	conn         *amqp.Connection
 	exchangeName string
 	exchangeType string
@@ -24,22 +31,27 @@ type Config struct {
 	ExchangeDurable bool
 }
 
-func NewRabbitMQ(cfg Config) (*RabbitMQ, error) {
-	conn, err := amqp.Dial(cfg.URL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to RabbitMQ: %w", err)
-	}
-
-	return &RabbitMQ{
-		conn:         conn,
+func NewAmqp(cfg Config) (AMQP, error) {
+	mq := &rabbitMq{
+		conn:         nil,
 		exchangeName: cfg.ExchangeName,
 		exchangeType: cfg.ExchangeType,
 		logger:       cfg.Logger,
 		config:       cfg,
-	}, nil
+	}
+
+	conn, err := amqp.Dial(cfg.URL)
+	if err != nil {
+		return mq, fmt.Errorf("failed to connect to message queue: %w", err)
+	}
+	mq.conn = conn
+	return mq, nil
 }
 
-func (r *RabbitMQ) OpenChannel() (*amqp.Channel, error) {
+func (r *rabbitMq) OpenChannel() (*amqp.Channel, error) {
+	if r.conn == nil || r.conn.IsClosed() {
+		return nil, fmt.Errorf("connection is not established or closed")
+	}
 	ch, err := r.conn.Channel()
 	if err != nil {
 		return nil, fmt.Errorf("failed to open a channel: %w", err)
@@ -63,7 +75,10 @@ func (r *RabbitMQ) OpenChannel() (*amqp.Channel, error) {
 	return ch, nil
 }
 
-func (r *RabbitMQ) Publish(ctx context.Context, routingKey string, body []byte) error {
+func (r *rabbitMq) Publish(ctx context.Context, routingKey string, body []byte) error {
+	if r.conn == nil || r.conn.IsClosed() {
+		return fmt.Errorf("connection is not established or closed")
+	}
 	ch, err := r.OpenChannel()
 	if err != nil {
 		return err
@@ -78,7 +93,10 @@ func (r *RabbitMQ) Publish(ctx context.Context, routingKey string, body []byte) 
 	return nil
 }
 
-func (r *RabbitMQ) PublishWithChannel(ctx context.Context, ch *amqp.Channel, routingKey string, body []byte) error {
+func (r *rabbitMq) PublishWithChannel(ctx context.Context, ch *amqp.Channel, routingKey string, body []byte) error {
+	if r.conn == nil || r.conn.IsClosed() {
+		return fmt.Errorf("connection is not established or closed")
+	}
 	err := ch.PublishWithContext(
 		ctx,
 		r.exchangeName,
@@ -98,7 +116,10 @@ func (r *RabbitMQ) PublishWithChannel(ctx context.Context, ch *amqp.Channel, rou
 	return nil
 }
 
-func (r *RabbitMQ) Close() error {
+func (r *rabbitMq) Close() error {
+	if r.conn == nil || r.conn.IsClosed() {
+		return nil
+	}
 	if r.conn != nil {
 		err := r.conn.Close()
 		if err != nil {
