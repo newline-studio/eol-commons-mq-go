@@ -21,7 +21,7 @@ type Publisher interface {
 }
 
 type EventSubscription func(ctx context.Context, delivery amqp.Delivery) error
-type EventSubscriptionMiddleware func(ctx context.Context, delivery amqp.Delivery, next EventSubscription) error
+type EventSubscriptionMiddleware func(next EventSubscription) EventSubscription
 
 type Subscriber interface {
 	Subscribe(routingKey string, handler EventSubscription, noWait bool, args map[string]interface{}) error

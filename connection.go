@@ -162,7 +162,7 @@ func (a *amqpSubscriber) Listen(ctx context.Context, middleware EventSubscriptio
 		for _, handler := range a.handlers {
 			if handler.exp.MatchString(delivery.RoutingKey) {
 				if middleware != nil {
-					_ = middleware(ctx, delivery, handler.handler)
+					_ = middleware(handler.handler)(ctx, delivery)
 				} else {
 					_ = handler.handler(ctx, delivery)
 				}

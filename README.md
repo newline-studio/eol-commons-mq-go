@@ -63,9 +63,11 @@ _ = subscriber.Subscribe("#.baz", func(ctx context.Context, delivery amqp.Delive
 }, false, nil)
 
 // Global delivery middleware
-middleware := func(ctx context.Context, delivery amqp.Delivery, next commonsMq.EventSubscription) error {
-    fmt.Println("MIDDLEWARE")
-    return next(ctx, delivery)
+middleware := func(next commonsMq.EventSubscription) commonsMq.EventSubscription {
+    return func(ctx context.Context, delivery amqp.Delivery) error {
+        fmt.Println("MIDDLEWARE")
+        return next(ctx, delivery)
+    }
 }
 
 // Will listen for messages forever
