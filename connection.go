@@ -12,13 +12,15 @@ import (
 )
 
 func NewConnection(url string) (Connection, error) {
+	manager := &amqpConnection{
+		conn: nil,
+	}
 	conn, err := amqp.Dial(url)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to message queue: %w", err)
+		return manager, fmt.Errorf("failed to connect to message queue: %w", err)
 	}
-	return &amqpConnection{
-		conn: conn,
-	}, nil
+	manager.conn = conn
+	return manager, nil
 }
 
 type amqpConnection struct {
@@ -40,6 +42,9 @@ func (a *amqpConnection) Subscriber(config SubscriberConfig) Subscriber {
 }
 
 func (a *amqpConnection) Close() error {
+	if a.conn == nil {
+		return fmt.Errorf("connection is not established")
+	}
 	err := a.conn.Close()
 	if err != nil {
 		return fmt.Errorf("error closing connection: %w", err)
@@ -48,6 +53,9 @@ func (a *amqpConnection) Close() error {
 }
 
 func (a *amqpConnection) OpenChannel(config ExchangeConfig) (*amqp.Channel, error) {
+	if a.conn == nil {
+		return nil, fmt.Errorf("connection is not established")
+	}
 	ch, err := a.conn.Channel()
 	if err != nil {
 		return nil, fmt.Errorf("failed to open a channel: %w", err)
@@ -115,6 +123,10 @@ func (a *amqpSubscriber) Subscribe(routingKey string, handler EventSubscription,
 }
 
 func (a *amqpSubscriber) Listen(ctx context.Context, middleware EventSubscriptionMiddleware, autoAck bool, exclusive bool, noLocal bool, noWait bool, args map[string]any) error {
+	if a.connection.conn == nil {
+		return fmt.Errorf("connection is not established")
+	}
+
 	connection, err := a.connection.OpenChannel(a.config.ExchangeConfig)
 	if err != nil {
 		return fmt.Errorf("failed to open channel: %w", err)
@@ -178,6 +190,9 @@ type amqpPublisher struct {
 }
 
 func (a *amqpPublisher) Publish(ctx context.Context, routingKey string, body any, mandatory bool, immediate bool) error {
+	if a.connection.conn == nil {
+		return fmt.Errorf("connection is not established")
+	}
 	publish, closer, err := a.PublishMultiple()
 	if err != nil {
 		return fmt.Errorf("failed to prepare publishing channel: %w", err)
@@ -190,6 +205,9 @@ func (a *amqpPublisher) Publish(ctx context.Context, routingKey string, body any
 }
 
 func (a *amqpPublisher) PublishMultiple() (EventPublish, ChannelClose, error) {
+	if a.connection.conn == nil {
+		return nil, nil, fmt.Errorf("connection is not established")
+	}
 	channel, err := a.connection.OpenChannel(a.config.ExchangeConfig)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open channel: %w", err)
