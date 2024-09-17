@@ -13,18 +13,31 @@ import (
 
 func NewConnection(url string) (Connection, error) {
 	manager := &amqpConnection{
-		conn: nil,
+		conn:          nil,
+		connectionUrl: url,
 	}
-	conn, err := amqp.Dial(url)
-	if err != nil {
-		return manager, fmt.Errorf("failed to connect to message queue: %w", err)
-	}
-	manager.conn = conn
-	return manager, nil
+	err := manager.reestablishConnection()
+	return manager, err
 }
 
 type amqpConnection struct {
-	conn *amqp.Connection
+	conn          *amqp.Connection
+	connectionUrl string
+	sync          sync.Mutex
+}
+
+func (a *amqpConnection) reestablishConnection() error {
+	a.sync.Lock()
+	defer a.sync.Unlock()
+	if a.conn != nil && !a.conn.IsClosed() {
+		return nil
+	}
+	conn, err := amqp.Dial(a.connectionUrl)
+	if err != nil {
+		return fmt.Errorf("failed to connect to message queue: %w", err)
+	}
+	a.conn = conn
+	return nil
 }
 
 func (a *amqpConnection) Publisher(config PublisherConfig) Publisher {
@@ -45,6 +58,9 @@ func (a *amqpConnection) Close() error {
 	if a.conn == nil {
 		return fmt.Errorf("connection is not established")
 	}
+	if a.conn.IsClosed() {
+		return nil
+	}
 	err := a.conn.Close()
 	if err != nil {
 		return fmt.Errorf("error closing connection: %w", err)
@@ -53,8 +69,8 @@ func (a *amqpConnection) Close() error {
 }
 
 func (a *amqpConnection) OpenChannel(config ExchangeConfig) (*amqp.Channel, error) {
-	if a.conn == nil {
-		return nil, fmt.Errorf("connection is not established")
+	if err := a.reestablishConnection(); err != nil {
+		return nil, fmt.Errorf("unable to reestablish connection: %w", err)
 	}
 	ch, err := a.conn.Channel()
 	if err != nil {
@@ -123,8 +139,8 @@ func (a *amqpSubscriber) Subscribe(routingKey string, handler EventSubscription,
 }
 
 func (a *amqpSubscriber) Listen(ctx context.Context, middleware EventSubscriptionMiddleware, autoAck bool, exclusive bool, noLocal bool, noWait bool, args map[string]any) error {
-	if a.connection.conn == nil {
-		return fmt.Errorf("connection is not established")
+	if err := a.connection.reestablishConnection(); err != nil {
+		return fmt.Errorf("unable to reestablish connection: %w", err)
 	}
 
 	connection, err := a.connection.OpenChannel(a.config.ExchangeConfig)
@@ -190,8 +206,8 @@ type amqpPublisher struct {
 }
 
 func (a *amqpPublisher) Publish(ctx context.Context, routingKey string, body any, mandatory bool, immediate bool) error {
-	if a.connection.conn == nil {
-		return fmt.Errorf("connection is not established")
+	if err := a.connection.reestablishConnection(); err != nil {
+		return fmt.Errorf("unable to reestablish connection: %w", err)
 	}
 	publish, closer, err := a.PublishMultiple()
 	if err != nil {
@@ -205,8 +221,8 @@ func (a *amqpPublisher) Publish(ctx context.Context, routingKey string, body any
 }
 
 func (a *amqpPublisher) PublishMultiple() (EventPublish, ChannelClose, error) {
-	if a.connection.conn == nil {
-		return nil, nil, fmt.Errorf("connection is not established")
+	if err := a.connection.reestablishConnection(); err != nil {
+		return nil, nil, fmt.Errorf("unable to reestablish connection: %w", err)
 	}
 	channel, err := a.connection.OpenChannel(a.config.ExchangeConfig)
 	if err != nil {
