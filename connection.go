@@ -172,6 +172,9 @@ func (a *amqpSubscriber) Listen(ctx context.Context, middleware EventSubscriptio
 		}
 	}
 
+	errCh := make(chan *amqp.Error)
+	connection.NotifyClose(errCh)
+
 	messages, err := connection.Consume(
 		queue.Name,
 		"",
@@ -186,18 +189,27 @@ func (a *amqpSubscriber) Listen(ctx context.Context, middleware EventSubscriptio
 	}
 
 	// Read messages from the channel
-	for delivery := range messages {
-		for _, handler := range a.handlers {
-			if handler.exp.MatchString(delivery.RoutingKey) {
-				if middleware != nil {
-					_ = middleware(handler.handler)(ctx, delivery)
-				} else {
-					_ = handler.handler(ctx, delivery)
+	for {
+		select {
+		case delivery, ok := <-messages:
+			if !ok {
+				return fmt.Errorf("message channel closed")
+			}
+			for _, handler := range a.handlers {
+				if handler.exp.MatchString(delivery.RoutingKey) {
+					if middleware != nil {
+						_ = middleware(handler.handler)(ctx, delivery)
+					} else {
+						_ = handler.handler(ctx, delivery)
+					}
 				}
+			}
+		case err := <-errCh:
+			if err != nil {
+				return fmt.Errorf("rabbitmq connection closed: %w", err)
 			}
 		}
 	}
-	return nil
 }
 
 type amqpPublisher struct {
